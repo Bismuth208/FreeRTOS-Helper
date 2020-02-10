@@ -21,23 +21,23 @@ public:
 
   Task(TaskFunction_t pxTaskFunc,
     uint32_t ulStackSizeWords = configMINIMAL_STACK_SIZE,
-    UBaseType_t uxPriority = 1,
 #ifdef ESP32
     uint32_t ulPinnedCore = 2,
 #endif
+    UBaseType_t uxPriority = 1,
     void * const pvArgs = NULL,
     const char * const pcFuncName = "\0"
   ) : m_ulStackSizeWords(ulStackSizeWords)
   {
 #ifdef ESP32
 #if configSUPPORT_STATIC_ALLOCATION
-    if (ulPinnedCore > 1) {
+    if (ulPinnedCore < 2) {
       m_xTask = xTaskCreateStaticPinnedToCore( pxTaskFunc, pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, m_xStack, &m_xTaskControlBlock, (BaseType_t) ulPinnedCore );
     } else {
       m_xTask = xTaskCreateStatic( pxTaskFunc, pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, m_xStack, &m_xTaskControlBlock );
     }
 #else
-    if (ulPinnedCore > 1) {
+    if (ulPinnedCore < 2) {
       xTaskCreatePinnedToCore( pxTaskFunc, pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, &m_xTask, ulPinnedCore );
     } else {
       xTaskCreate( pxTaskFunc, pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, &m_xTask );
