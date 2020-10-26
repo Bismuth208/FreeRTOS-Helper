@@ -7,7 +7,7 @@
 
 // - - - - - - - - -- - - - - - - - - - - - - - -
 
-// template<size_t StackSizeWords>
+template<size_t StackSizeInWords>
 class Task
 {
 public:
@@ -16,18 +16,17 @@ public:
 
 #if configSUPPORT_STATIC_ALLOCATION
   StaticTask_t m_xTaskControlBlock;
-  StackType_t m_xStack[m_ulStackSizeWords]; // FIXME: this is not working in C++ ...
+  StackType_t m_xStack[StackSizeInWords];
 #endif
 
   Task(TaskFunction_t pxTaskFunc,
-    uint32_t ulStackSizeWords = configMINIMAL_STACK_SIZE,
 #ifdef ESP32
     uint32_t ulPinnedCore = 2,
 #endif
     UBaseType_t uxPriority = 1,
     void * const pvArgs = NULL,
     const char * const pcFuncName = "\0"
-  ) : m_ulStackSizeWords(ulStackSizeWords)
+  ) : m_ulStackSizeWords(StackSizeInWords)
   {
 #ifdef ESP32
 #if configSUPPORT_STATIC_ALLOCATION
