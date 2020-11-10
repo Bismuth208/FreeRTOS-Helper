@@ -6,6 +6,15 @@
 #include <Arduino.h>
 
 // - - - - - - - - -- - - - - - - - - - - - - - -
+#ifdef ESP32
+typedef enum {
+  ESP32_CORE_0 = 0,  // Main Core
+  ESP32_CORE_1,      // App core
+  ESP32_CORE_NONE    // No core specified
+} esp_core_num_t;
+#endif
+
+// - - - - - - - - -- - - - - - - - - - - - - - -
 
 template<size_t StackSizeInWords>
 class Task
@@ -21,7 +30,7 @@ public:
 
   Task(TaskFunction_t pxTaskFunc,
 #ifdef ESP32
-    uint32_t ulPinnedCore = 2,
+    esp_core_num_t ePinnedCore = ESP32_CORE_NONE,
 #endif
     UBaseType_t uxPriority = 1,
     void * const pvArgs = NULL,
@@ -30,14 +39,14 @@ public:
   {
 #ifdef ESP32
 #if configSUPPORT_STATIC_ALLOCATION
-    if (ulPinnedCore < 2) {
-      m_xTask = xTaskCreateStaticPinnedToCore( pxTaskFunc, pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, m_xStack, &m_xTaskControlBlock, (BaseType_t) ulPinnedCore );
+    if (ePinnedCore < ESP32_CORE_NONE) {
+      m_xTask = xTaskCreateStaticPinnedToCore( pxTaskFunc, pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, m_xStack, &m_xTaskControlBlock, (BaseType_t) ePinnedCore );
     } else {
       m_xTask = xTaskCreateStatic( pxTaskFunc, pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, m_xStack, &m_xTaskControlBlock );
     }
 #else
-    if (ulPinnedCore < 2) {
-      xTaskCreatePinnedToCore( pxTaskFunc, pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, &m_xTask, ulPinnedCore );
+    if (ePinnedCore < ESP32_CORE_NONE) {
+      xTaskCreatePinnedToCore( pxTaskFunc, pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, &m_xTask, (BaseType_t) ePinnedCore );
     } else {
       xTaskCreate( pxTaskFunc, pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, &m_xTask );
     }
