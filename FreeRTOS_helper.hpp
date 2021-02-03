@@ -1,27 +1,54 @@
+/*
+ * Helpfull API to make use of FreeRTOS a little easier
+ *
+ * Author: Alexandr Antonov (@Bismuth208)
+ *
+ * Licence: MIT
+ */
+
 #ifndef FREERTOS_HELPER_HPP
 #define FREERTOS_HELPER_HPP
 
-// - - - - - - - - -- - - - - - - - - - - - - - -
+// - - - - - - - - - - - - - - - - - - - - - - - -
 
 #include <Arduino.h>
 
-// - - - - - - - - -- - - - - - - - - - - - - - -
-#ifdef ESP32
-typedef enum {
-  ESP32_CORE_0 = 0,  // Main Core
-  ESP32_CORE_1,      // App core
-  ESP32_CORE_NONE    // No core specified
-} esp_core_num_t;
+// - - - - - - - - - - - - - - - - - - - - - - - -
+
+/*
+ * As more and more multicore microcontrollers oppear,
+ * this one, no more belong to ESP32 only !
+ */
+#ifdef ESP32 // || RP2040
+#  define OS_MCU_ENABLE_MULTICORE_SUPPORT
 #endif
 
-// - - - - - - - - -- - - - - - - - - - - - - - -
 
+#ifdef OS_MCU_ENABLE_MULTICORE_SUPPORT
+typedef enum {
+  OS_MCU_CORE_0 = 0UL,  // "Main Core" in ESP32 or PiPico
+  OS_MCU_CORE_1,        // "App core"
+  OS_MCU_CORE_NONE      // No core specified
+} os_mcu_core_num_t;
+#endif // OS_MCU_ENABLE_MULTICORE_SUPPORT
+
+// - - - - - - - - - - - - - - - - - - - - - - - -
+
+/*
+ * Template class for Task creation and manipulation
+ *
+ * Examples:
+ * 
+ * // Create task on CPU0 ( ESP32 like) and provide 4096 words for it in stack
+ * Task <4096>AppMainTask((TaskFunction_t) vAppMainTask, OS_MCU_CORE_0);
+ *
+ */
 template<size_t StackSizeInWords>
 class Task
 {
 public:
   TaskHandle_t m_xTask = NULL;
-  const uint32_t m_ulStackSizeWords = 0;
+  const uint32_t m_ulStackSizeWords = 0UL;
 
 #if configSUPPORT_STATIC_ALLOCATION
   StaticTask_t m_xTaskControlBlock;
@@ -29,68 +56,97 @@ public:
 #endif
 
   Task(TaskFunction_t pxTaskFunc,
-#ifdef ESP32
-    esp_core_num_t ePinnedCore = ESP32_CORE_NONE,
+#ifdef OS_MCU_ENABLE_MULTICORE_SUPPORT
+    os_mcu_core_num_t ePinnedCore = OS_MCU_CORE_NONE,
 #endif
-    UBaseType_t uxPriority = 1,
+    UBaseType_t uxPriority = 1UL,
     void * const pvArgs = NULL,
     const char * const pcFuncName = "\0"
   ) : m_ulStackSizeWords(StackSizeInWords)
   {
-#ifdef ESP32
-#if configSUPPORT_STATIC_ALLOCATION
-    if (ePinnedCore < ESP32_CORE_NONE) {
+#ifdef OS_MCU_ENABLE_MULTICORE_SUPPORT
+#  if configSUPPORT_STATIC_ALLOCATION
+    if (ePinnedCore < OS_MCU_CORE_NONE) {
       m_xTask = xTaskCreateStaticPinnedToCore( pxTaskFunc, pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, m_xStack, &m_xTaskControlBlock, (BaseType_t) ePinnedCore );
     } else {
       m_xTask = xTaskCreateStatic( pxTaskFunc, pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, m_xStack, &m_xTaskControlBlock );
     }
-#else
-    if (ePinnedCore < ESP32_CORE_NONE) {
+#  else
+    if (ePinnedCore < OS_MCU_CORE_NONE) {
       xTaskCreatePinnedToCore( pxTaskFunc, pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, &m_xTask, (BaseType_t) ePinnedCore );
     } else {
       xTaskCreate( pxTaskFunc, pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, &m_xTask );
     }
-#endif // configSUPPORT_STATIC_ALLOCATION
+#  endif // configSUPPORT_STATIC_ALLOCATION
 #else
-#if configSUPPORT_STATIC_ALLOCATION
+#  if configSUPPORT_STATIC_ALLOCATION
     m_xTask = xTaskCreateStatic( pxTaskFunc, pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, m_xStack, &m_xTaskControlBlock );
-#else
+#  else
     xTaskCreate( pxTaskFunc, pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, &m_xTask );
-#endif
-#endif // ESP32
+#  endif
+#endif // OS_MCU_ENABLE_MULTICORE_SUPPORT
   }
 
+  /*
+   * If for some reason Task must be stopped
+   */
   void stop(void) {
     vTaskSuspend(m_xTask);
   }
 
+  /*
+   * If for some reason Task must be started
+   */
   void start(void) {
     vTaskResume(m_xTask);
   }
 
+  /*
+   * This method allow to unblock Task.
+   * Lock/unlock mechanism similar to binary semaphore,
+   * but according to datasheet of FreeRTOS way more lightweight.
+   *
+   * NOTE!
+   * This method can be used in any task, even by task itself.
+   */
   void emitSignal(void) {
     xTaskNotifyGive(m_xTask);
   }
 
+  /*
+   * This method allow to block Task.
+   * Lock/unlock mechanism similar to binary semaphore,
+   * but according to datasheet of FreeRTOS way more lightweight.
+   *
+   * NOTE!
+   * This is must be used inside Task what need to be blocked!
+   */
   void waitSignal(TickType_t xTicksToWait = portMAX_DELAY) {
-    do {
-      // taskYIELD(); // TODO: add something here
-    } while (ulTaskNotifyTake(pdFALSE, xTicksToWait) == 0UL);
+    ulTaskNotifyTake(pdFALSE, xTicksToWait);
   }
 };
 
-// - - - - - - - - -- - - - - - - - - - - - - - -
+// - - - - - - - - - - - - - - - - - - - - - - - -
 
+/*
+ * Template class for Queue
+ *
+ * Examples:
+ * 
+ * // creation of Queue for 128 uint32_t elements in it
+ * Queue <128, uint32_t>TxQueue;
+ *
+ */
 template<size_t QueueSize, class T>
 class Queue
 {
 public:
   const QueueHandle_t m_xQueueHandler = NULL;
-  const size_t m_xQueueSize = 0;
+  const size_t m_xQueueSize = 0UL;
 
 #if configSUPPORT_STATIC_ALLOCATION
   StaticQueue_t m_xControlBlock;
-  T m_xStorage[m_xQueueSize]; // this is ok, thx to template
+  T m_xStorage[QueueSize]; // this is ok, thx to template
 
   Queue() : m_xQueueHandler( xQueueCreateStatic(QueueSize, sizeof(T), static_cast<uint8_t*>(m_xStorage), &m_xControlBlock) ), m_xQueueSize(QueueSize) {};
 #else
@@ -114,8 +170,19 @@ public:
   }
 };
 
-// - - - - - - - - -- - - - - - - - - - - - - - -
+// - - - - - - - - - - - - - - - - - - - - - - - -
 
+/*
+ * Class for Mutex
+ *
+ * Examples:
+ *
+ * Mutex spiMutex;  // creation of SPI mutex
+ *
+ * spiMutex.lock(); // blocks resource for other tasks 
+ * ... some actions ...
+ * spiMutex.unlock(); // unblocks resource for other tasks
+ */
 class Mutex
 {
 public:
@@ -130,7 +197,7 @@ public:
 #endif
 
   BaseType_t lock(TickType_t xTicksToWait = portMAX_DELAY) {
-    return xSemaphoreTake(m_xMutex, xTicksToWait);      
+    return xSemaphoreTake(m_xMutex, xTicksToWait);
   }
 
   BaseType_t unlock(void) {
@@ -138,8 +205,24 @@ public:
   }
 };
 
-// - - - - - - - - -- - - - - - - - - - - - - - -
+// - - - - - - - - - - - - - - - - - - - - - - - -
 
+/*
+ * Class for Counting Semaphore
+ *
+ * Examples:
+ *
+ * Counter btnPressCounter;  // creation
+ *
+ * if (btn_read(SOME_BTN_NUM) == 1) {
+ *   btnPressCounter.give();
+ * }
+ *
+ * Meanwhile in other Task:
+ * while (btnPressCounter.take(0UL) == pdTRUE) {
+ *   blink_ok_led();
+ * }
+ */
 template<size_t MaxCount>
 class Counter
 {
@@ -167,8 +250,22 @@ public:
   }
 };
 
-// - - - - - - - - -- - - - - - - - - - - - - - -
+// - - - - - - - - - - - - - - - - - - - - - - - -
 
+/*
+ * Template class for software Timer
+ *
+ * Examples:
+ * 
+ * // creation of "one shot" timer
+ * Timer wifiOffTimer;
+ *
+ * if (something == pdTRUE) {
+ *   if (wifiOffTimer.isActive() == pdFALSE) {
+ *     wifiOffTimer.start(500); // shut down WiFi after 500ms.
+ *   }
+ * }
+ */
 class Timer
 {
 public:
@@ -191,7 +288,7 @@ public:
     // nothing here yet
   };
 
-  BaseType_t start(TickType_t xTimerPeriodInMs = 0) {
+  BaseType_t start(TickType_t xTimerPeriodInMs = 0UL) {
     TickType_t xTiks = xTimerPeriodInMs / portTICK_PERIOD_MS;
     
     xTimerChangePeriod(m_xTimer, xTiks, 0);
@@ -213,6 +310,6 @@ public:
 #endif
 };
 
-// - - - - - - - - -- - - - - - - - - - - - - - -
+// - - - - - - - - - - - - - - - - - - - - - - - -
 
 #endif /* FREERTOS_HELPER_HPP */
