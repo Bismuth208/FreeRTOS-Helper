@@ -15,6 +15,14 @@
 
 // - - - - - - - - - - - - - - - - - - - - - - - -
 
+// TODO:
+//  - add xPortInIsrContext() or uxInterruptNesting for IRQ safe;
+//  - add Semathore class;
+//  - add xPortGetCoreID for multicore systems
+//  - add more examples
+
+// - - - - - - - - - - - - - - - - - - - - - - - -
+
 /*
  * As more and more multicore microcontrollers oppear,
  * this one, no more belong to ESP32 only !
@@ -55,7 +63,7 @@ public:
   StackType_t m_xStack[StackSizeInWords];
 #endif
 
-  Task(TaskFunction_t pxTaskFunc,
+  Task( void (*pxTaskFunc)(void*),
 #ifdef OS_MCU_ENABLE_MULTICORE_SUPPORT
     os_mcu_core_num_t ePinnedCore = OS_MCU_CORE_NONE,
 #endif
@@ -67,39 +75,56 @@ public:
 #ifdef OS_MCU_ENABLE_MULTICORE_SUPPORT
 #  if configSUPPORT_STATIC_ALLOCATION
     if (ePinnedCore < OS_MCU_CORE_NONE) {
-      m_xTask = xTaskCreateStaticPinnedToCore( pxTaskFunc, pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, m_xStack, &m_xTaskControlBlock, (BaseType_t) ePinnedCore );
+      m_xTask = xTaskCreateStaticPinnedToCore( static_cast<TaskFunction_t> (pxTaskFunc), pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, m_xStack, &m_xTaskControlBlock, (BaseType_t) ePinnedCore );
     } else {
-      m_xTask = xTaskCreateStatic( pxTaskFunc, pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, m_xStack, &m_xTaskControlBlock );
+      m_xTask = xTaskCreateStatic( static_cast<TaskFunction_t> (pxTaskFunc), pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, m_xStack, &m_xTaskControlBlock );
     }
 #  else
     if (ePinnedCore < OS_MCU_CORE_NONE) {
-      xTaskCreatePinnedToCore( pxTaskFunc, pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, &m_xTask, (BaseType_t) ePinnedCore );
+      xTaskCreatePinnedToCore( static_cast<TaskFunction_t> (pxTaskFunc), pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, &m_xTask, (BaseType_t) ePinnedCore );
     } else {
-      xTaskCreate( pxTaskFunc, pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, &m_xTask );
+      xTaskCreate( static_cast<TaskFunction_t> (pxTaskFunc), pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, &m_xTask );
     }
 #  endif // configSUPPORT_STATIC_ALLOCATION
 #else
 #  if configSUPPORT_STATIC_ALLOCATION
-    m_xTask = xTaskCreateStatic( pxTaskFunc, pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, m_xStack, &m_xTaskControlBlock );
+    m_xTask = xTaskCreateStatic( static_cast<TaskFunction_t> (pxTaskFunc), pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, m_xStack, &m_xTaskControlBlock );
 #  else
-    xTaskCreate( pxTaskFunc, pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, &m_xTask );
+    xTaskCreate( static_cast<TaskFunction_t> (pxTaskFunc), pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, &m_xTask );
 #  endif
 #endif // OS_MCU_ENABLE_MULTICORE_SUPPORT
   }
 
+#if INCLUDE_vTaskDelete
+  ~Task() {
+    // if (m_xTask != NULL) {
+      vTaskDelete(m_xTask);
+      // m_xTask = NULL;
+    // }
+  }
+#else
+  // WARNING!
+  #warning "Possible memory leak! Due to no vTaskDelete"
+  ~Task() = default;
+#endif
+
   /*
    * If for some reason Task must be stopped
    */
+#if INCLUDE_vTaskSuspend
   void stop(void) {
     vTaskSuspend(m_xTask);
   }
+#endif
 
   /*
    * If for some reason Task must be started
    */
+#if INCLUDE_vTaskResume
   void start(void) {
     vTaskResume(m_xTask);
   }
+#endif
 
   /*
    * This method allow to unblock Task.
@@ -109,9 +134,11 @@ public:
    * NOTE!
    * This method can be used in any task, even by task itself.
    */
+#if configUSE_TASK_NOTIFICATIONS
   void emitSignal(void) {
     xTaskNotifyGive(m_xTask);
   }
+#endif
 
   /*
    * This method allow to block Task.
@@ -121,9 +148,33 @@ public:
    * NOTE!
    * This is must be used inside Task what need to be blocked!
    */
+#if configUSE_TASK_NOTIFICATIONS
   void waitSignal(TickType_t xTicksToWait = portMAX_DELAY) {
-    ulTaskNotifyTake(pdFALSE, xTicksToWait);
+    do {
+#ifdef ESP32
+      # ifndef XT_NOP()
+
+      #  define XT_NOP()  __asm__ __volatile__ ("nop");
+      #  warning "Due to some reason XT_NOP() is not implemented !"
+      # endif
+#endif // ESP32
+
+      portNOP();
+    } while (ulTaskNotifyTake(pdFALSE, xTicksToWait) == pdFALSE);
   }
+#endif
+
+  /*
+   * Yet another way to wait and pause(block) Task
+   *
+   * Usage:
+   *  Task<0>::delay(500); // block Task for 500 ms.
+   */
+#if INCLUDE_vTaskDelay
+  static void delay(TickType_t xTimerPeriodInMs = 1UL) {
+    vTaskDelay(pdMS_TO_TICKS(xTimerPeriodInMs));
+  }
+#endif
 };
 
 // - - - - - - - - - - - - - - - - - - - - - - - -
@@ -152,6 +203,13 @@ public:
 #else
   Queue() : m_xQueueHandler( xQueueCreate(QueueSize, sizeof(T)) ), m_xQueueSize(QueueSize) {};
 #endif
+
+  ~Queue() {
+    // if (m_xQueueHandler != NULL) {
+      vQueueDelete(m_xQueueHandler);
+      // m_xQueueHandler = NULL;
+    // }
+  };
 
   BaseType_t receive(T *val, TickType_t xTicksToWait = portMAX_DELAY) {
     return xQueueReceive(m_xQueueHandler, val, xTicksToWait);
@@ -183,6 +241,7 @@ public:
  * ... some actions ...
  * spiMutex.unlock(); // unblocks resource for other tasks
  */
+#if configUSE_MUTEXES
 class Mutex
 {
 public:
@@ -196,6 +255,13 @@ public:
   Mutex() : m_xMutex ( xSemaphoreCreateMutex() ) {}
 #endif
 
+  ~Mutex() {
+    // if (m_xMutex != NULL) {
+      vSemaphoreDelete(m_xMutex);
+      // m_xMutex = NULL
+    // }
+  };
+
   BaseType_t lock(TickType_t xTicksToWait = portMAX_DELAY) {
     return xSemaphoreTake(m_xMutex, xTicksToWait);
   }
@@ -204,6 +270,7 @@ public:
     return xSemaphoreGive(m_xMutex);
   }
 };
+#endif // configUSE_MUTEXES
 
 // - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -223,6 +290,7 @@ public:
  *   blink_ok_led();
  * }
  */
+#if configUSE_COUNTING_SEMAPHORES
 template<size_t MaxCount>
 class Counter
 {
@@ -237,6 +305,13 @@ public:
   Counter() : m_xConunter( xSemaphoreCreateCounting(MaxCount, 0) ) {}
 #endif
 
+  ~Counter() {
+    // if (m_xConunter != NULL) {
+      vSemaphoreDelete(m_xConunter);
+      // m_xConunter = NULL;
+    // }
+  };
+
   BaseType_t take(TickType_t xTicksToWait = portMAX_DELAY) {
     return xSemaphoreTake(m_xConunter, xTicksToWait);
   }
@@ -246,9 +321,10 @@ public:
   }
 
   void fflush(void) {
-    while (xSemaphoreTake(m_xConunter, 1));
+    while (xSemaphoreTake(m_xConunter, 1UL));
   }
 };
+#endif // configUSE_COUNTING_SEMAPHORES
 
 // - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -266,6 +342,7 @@ public:
  *   }
  * }
  */
+#if configUSE_TIMERS
 class Timer
 {
 public:
@@ -275,28 +352,33 @@ public:
   StaticTimer_t m_xTimerControlBlock;
 #endif
 
-  Timer( TimerCallbackFunction_t pxCallbackFunction,
+  Timer( void (*pxCallbackFunction)(void*),
     const UBaseType_t uxAutoReload = pdFALSE,
     void *const pvTimerID = NULL,
     const char *const pcTimerName = "\0" )
 #if configSUPPORT_STATIC_ALLOCATION
-  : m_xTimer( xTimerCreateStatic(pcTimerName, 1, uxAutoReload, pvTimerID, pxCallbackFunction, &m_xTimerControlBlock) )
+  : m_xTimer( xTimerCreateStatic(pcTimerName, 1, uxAutoReload, pvTimerID, static_cast<TimerCallbackFunction_t> (pxCallbackFunction), &m_xTimerControlBlock) )
 #else
-  : m_xTimer( xTimerCreate(pcTimerName, 1, uxAutoReload, pvTimerID, pxCallbackFunction) )
+  : m_xTimer( xTimerCreate(pcTimerName, 1, uxAutoReload, pvTimerID, static_cast<TimerCallbackFunction_t> (pxCallbackFunction)) )
 #endif
   {
     // nothing here yet
   };
 
+  ~Timer() {
+    // if (m_xTimer != NULL) {
+      xTimerDelete(m_xTimer, 0UL); // delete immediately
+      // m_xTimer = NULL;
+    // }
+  };
+
   BaseType_t start(TickType_t xTimerPeriodInMs = 0UL) {
-    TickType_t xTiks = xTimerPeriodInMs / portTICK_PERIOD_MS;
-    
-    xTimerChangePeriod(m_xTimer, xTiks, 0);
-    return xTimerStart(m_xTimer, 0);
+    xTimerChangePeriod(m_xTimer, pdMS_TO_TICKS(xTimerPeriodInMs), 0UL);
+    return xTimerStart(m_xTimer, 0UL);
   }
 
   BaseType_t stop() {
-    return xTimerStop(m_xTimer, 0);
+    return xTimerStop(m_xTimer, 0UL);
   }
 
   BaseType_t isActive() {
@@ -304,11 +386,12 @@ public:
   }
   
 #if 0
-  BaseType_t restart(TickType_t xTimerPeriodInMs = 0) {
-    return xTimerReset(m_xTimer, (xTimerPeriodInMs * portTICK_PERIOD_MS));
+  BaseType_t restart(TickType_t xTimerPeriodInMs = 0UL) {
+    return xTimerReset(m_xTimer, pdMS_TO_TICKS(xTimerPeriodInMs));
   }
 #endif
 };
+#endif // configUSE_TIMERS
 
 // - - - - - - - - - - - - - - - - - - - - - - - -
 
