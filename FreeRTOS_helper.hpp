@@ -1,40 +1,102 @@
 /*
- * Helpfull API to make use of FreeRTOS a little easier
+ * Helpful API to make use of FreeRTOS a little easier
  *
  * Author: Alexandr Antonov (@Bismuth208)
- *
  * Licence: MIT
+ * 
+ * Minimal FreeRTOS version: v10.4.3
+ * 
+ * (*) support for RP2040 is not tested
+ * 
+ * TODO:
+ *  - add Semaphore class;
+ *  - add xPortGetCoreID for multi-core systems
+ *  - add more examples and howto
+ *  - add EventGroups class;
+ *  - add RP2040 support
  */
 
-#ifndef FREERTOS_HELPER_HPP
-#define FREERTOS_HELPER_HPP
+#ifndef _FREERTOS_HELPER_HPP
+#define _FREERTOS_HELPER_HPP
 
 // - - - - - - - - - - - - - - - - - - - - - - - -
+#include <stdint.h>
 
-#include <Arduino.h>
+#include "freertos/FreeRTOSConfig.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
+#include "freertos/queue.h"
+#include "freertos/timers.h"
+
 
 // - - - - - - - - - - - - - - - - - - - - - - - -
-
-// TODO:
-//  - add xPortInIsrContext() or uxInterruptNesting for IRQ safe;
-//  - add Semathore class;
-//  - add xPortGetCoreID for multicore systems
-//  - add more examples
-
-// - - - - - - - - - - - - - - - - - - - - - - - -
-
-/*
- * As more and more multicore microcontrollers oppear,
- * this one, no more belong to ESP32 only !
- */
-#ifdef ESP32 // || RP2040
-#  define OS_MCU_ENABLE_MULTICORE_SUPPORT
+#ifdef RP2040
+#ifndef xPortInIsrContext()
+#define xPortInIsrContext() portCHECK_IF_IN_ISR()
 #endif
+
+#ifdef portNOP()
+#undef portNOP()
+#define portNOP() __asm__ __volatile__ ("nop");
+#endif
+
+#if ( ( configNUM_CORES > 1 ) && ( configUSE_CORE_AFFINITY == 1 ) )
+
+#define xTaskCreatePinnedToCore(taskCode, \
+                                name, \
+                                stackDepth, \
+                                parameters, \
+                                priority, \
+                                createdTask, \
+                                coreAffinityMask) \
+        xTaskCreateAffinitySet(taskCode, \
+                                name, \
+                                stackDepth, \
+                                parameters, \
+                                priority, \
+                                1 << coreAffinityMask, \
+                                createdTask)
+
+
+#define xTaskCreateStaticPinnedToCore(taskCode, \
+                                      name, \
+                                      stackDepth, \
+                                      parameters, \
+                                      priority, \
+                                      stackBuffer, \
+                                      taskBuffer, \
+                                      coreAffinityMask) \
+        xTaskCreateStaticAffinitySet(taskCode, \
+                                      name, \
+                                      stackDepth, \
+                                      parameters, \
+                                      priority, \
+                                      stackBuffer, \
+                                      taskBuffer, \
+                                      1 << coreAffinityMask)
+
+#define OS_MCU_ENABLE_MULTICORE_SUPPORT
+#endif
+#endif
+
+
+#ifdef ESP32
+// nop() issue fix
+#ifndef XT_NOP()
+#define XT_NOP()  __asm__ __volatile__ ("nop");
+#warning "Due to some reason XT_NOP() is not implemented !"
+#endif
+
+#define OS_MCU_ENABLE_MULTICORE_SUPPORT
+#endif // ESP32
+
+// - - - - - - - - - - - - - - - - - - - - - - - -
 
 
 #ifdef OS_MCU_ENABLE_MULTICORE_SUPPORT
 typedef enum {
-  OS_MCU_CORE_0 = 0UL,  // "Main Core" in ESP32 or PiPico
+  OS_MCU_CORE_0 = 0UL,  // "Main Core" in ESP32 or Pi Pico
   OS_MCU_CORE_1,        // "App core"
   OS_MCU_CORE_NONE      // No core specified
 } os_mcu_core_num_t;
@@ -73,25 +135,25 @@ public:
   ) : m_ulStackSizeWords(StackSizeInWords)
   {
 #ifdef OS_MCU_ENABLE_MULTICORE_SUPPORT
-#  if configSUPPORT_STATIC_ALLOCATION
+#if configSUPPORT_STATIC_ALLOCATION
     if (ePinnedCore < OS_MCU_CORE_NONE) {
       m_xTask = xTaskCreateStaticPinnedToCore( static_cast<TaskFunction_t> (pxTaskFunc), pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, m_xStack, &m_xTaskControlBlock, (BaseType_t) ePinnedCore );
     } else {
       m_xTask = xTaskCreateStatic( static_cast<TaskFunction_t> (pxTaskFunc), pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, m_xStack, &m_xTaskControlBlock );
     }
-#  else
+#else
     if (ePinnedCore < OS_MCU_CORE_NONE) {
       xTaskCreatePinnedToCore( static_cast<TaskFunction_t> (pxTaskFunc), pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, &m_xTask, (BaseType_t) ePinnedCore );
     } else {
       xTaskCreate( static_cast<TaskFunction_t> (pxTaskFunc), pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, &m_xTask );
     }
-#  endif // configSUPPORT_STATIC_ALLOCATION
+#endif // configSUPPORT_STATIC_ALLOCATION
 #else
-#  if configSUPPORT_STATIC_ALLOCATION
+#if configSUPPORT_STATIC_ALLOCATION
     m_xTask = xTaskCreateStatic( static_cast<TaskFunction_t> (pxTaskFunc), pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, m_xStack, &m_xTaskControlBlock );
-#  else
+#else
     xTaskCreate( static_cast<TaskFunction_t> (pxTaskFunc), pcFuncName, m_ulStackSizeWords, pvArgs, uxPriority, &m_xTask );
-#  endif
+#endif
 #endif // OS_MCU_ENABLE_MULTICORE_SUPPORT
   }
 
@@ -99,12 +161,12 @@ public:
   ~Task() {
     // if (m_xTask != NULL) {
       vTaskDelete(m_xTask);
-      // m_xTask = NULL;
+      m_xTask = NULL;
     // }
   }
 #else
   // WARNING!
-  #warning "Possible memory leak! Due to no vTaskDelete"
+  #error "Memory leak! Please, enable vTaskDelete"
   ~Task() = default;
 #endif
 
@@ -122,7 +184,15 @@ public:
    */
 #if INCLUDE_vTaskResume
   void start(void) {
-    vTaskResume(m_xTask);
+    if(xPortInIsrContext() == pdFALSE) {
+      vTaskResume(m_xTask);
+    } else {
+      BaseType_t xHigherPriorityStatus = xTaskResumeFromISR(m_xTask);
+
+      if(pdTRUE == xHigherPriorityStatus) {
+        portYIELD_FROM_ISR();
+      }
+    }
   }
 #endif
 
@@ -136,7 +206,17 @@ public:
    */
 #if configUSE_TASK_NOTIFICATIONS
   void emitSignal(void) {
-    xTaskNotifyGive(m_xTask);
+    BaseType_t xHigherPriorityStatus = pdFALSE;
+
+    if(xPortInIsrContext() == pdFALSE) {
+      xTaskNotifyGive(m_xTask);
+    } else {
+      vTaskNotifyGiveFromISR(m_xTask, &xHigherPriorityStatus);
+
+      if(pdTRUE == xHigherPriorityStatus) {
+        portYIELD_FROM_ISR();
+      }
+    }
   }
 #endif
 
@@ -151,14 +231,6 @@ public:
 #if configUSE_TASK_NOTIFICATIONS
   void waitSignal(TickType_t xTicksToWait = portMAX_DELAY) {
     do {
-#ifdef ESP32
-      # ifndef XT_NOP()
-
-      #  define XT_NOP()  __asm__ __volatile__ ("nop");
-      #  warning "Due to some reason XT_NOP() is not implemented !"
-      # endif
-#endif // ESP32
-
       portNOP();
     } while (ulTaskNotifyTake(pdFALSE, xTicksToWait) == pdFALSE);
   }
@@ -184,7 +256,7 @@ public:
  *
  * Examples:
  * 
- * // creation of Queue for 128 uint32_t elements in it
+ * // Creation of Queue with 128 elements of type uint32_t
  * Queue <128, uint32_t>TxQueue;
  *
  */
@@ -199,7 +271,7 @@ public:
   StaticQueue_t m_xControlBlock;
   T m_xStorage[QueueSize]; // this is ok, thx to template
 
-  Queue() : m_xQueueHandler( xQueueCreateStatic(QueueSize, sizeof(T), static_cast<uint8_t*>(m_xStorage), &m_xControlBlock) ), m_xQueueSize(QueueSize) {};
+  Queue() : m_xQueueHandler( xQueueCreateStatic(QueueSize, sizeof(T), reinterpret_cast<uint8_t*>(m_xStorage), &m_xControlBlock) ), m_xQueueSize(QueueSize) {};
 #else
   Queue() : m_xQueueHandler( xQueueCreate(QueueSize, sizeof(T)) ), m_xQueueSize(QueueSize) {};
 #endif
@@ -212,11 +284,37 @@ public:
   };
 
   BaseType_t receive(T *val, TickType_t xTicksToWait = portMAX_DELAY) {
-    return xQueueReceive(m_xQueueHandler, val, xTicksToWait);
+    BaseType_t res = pdFALSE;
+    BaseType_t xHigherPriorityStatus = pdFALSE;
+
+    if(xPortInIsrContext() == pdFALSE) {
+      res = xQueueReceive(m_xQueueHandler, val, xTicksToWait);
+    } else {
+      res = xQueueReceiveFromISR(m_xQueueHandler, val, &xHigherPriorityStatus);
+
+      if(pdTRUE == xHigherPriorityStatus) {
+        portYIELD_FROM_ISR();
+      }
+    }
+
+    return res;
   }
 
   BaseType_t send(const T *val, TickType_t xTicksToWait = portMAX_DELAY) {
-    return xQueueSend(m_xQueueHandler, val, xTicksToWait);
+    BaseType_t res = pdFALSE;
+    BaseType_t xHigherPriorityStatus = pdFALSE;
+
+    if(xPortInIsrContext() == pdFALSE) {
+      res = xQueueSend(m_xQueueHandler, val, xTicksToWait);
+    } else {
+      res = xQueueSendFromISR(m_xQueueHandler, val, &xHigherPriorityStatus);
+
+      if(pdTRUE == xHigherPriorityStatus) {
+        portYIELD_FROM_ISR();
+      }
+    }
+
+    return res;
   }
 
   BaseType_t isEmpty(void) {
@@ -240,6 +338,9 @@ public:
  * spiMutex.lock(); // blocks resource for other tasks 
  * ... some actions ...
  * spiMutex.unlock(); // unblocks resource for other tasks
+ * 
+ * NOTE!
+ * Do not use Mutexes inside ISR context.
  */
 #if configUSE_MUTEXES
 class Mutex
@@ -300,7 +401,7 @@ public:
 #if configSUPPORT_STATIC_ALLOCATION
   StaticSemaphore_t m_xSemaphoreControlBlock;
 
-  Counter() : m_xConunter( xSemaphoreCreateCounting(MaxCount, 0, &m_xSemaphoreControlBlock) ) {}
+  Counter() : m_xConunter( xSemaphoreCreateCountingStatic(MaxCount, 0, &m_xSemaphoreControlBlock) ) {}
 #else
   Counter() : m_xConunter( xSemaphoreCreateCounting(MaxCount, 0) ) {}
 #endif
@@ -313,15 +414,52 @@ public:
   };
 
   BaseType_t take(TickType_t xTicksToWait = portMAX_DELAY) {
-    return xSemaphoreTake(m_xConunter, xTicksToWait);
+    BaseType_t res = pdFALSE;
+    BaseType_t xHigherPriorityStatus = pdFALSE;
+
+    if(xPortInIsrContext() == pdFALSE) {
+      res = xSemaphoreTake(m_xConunter, xTicksToWait);
+    } else {
+      res = xSemaphoreTakeFromISR(m_xConunter, &xHigherPriorityStatus);
+
+      if(pdTRUE == xHigherPriorityStatus) {
+        portYIELD_FROM_ISR();
+      }
+    }
+
+    return res;
   }
 
   BaseType_t give(void) {
-    return xSemaphoreGive(m_xConunter);
+    BaseType_t res = pdFALSE;
+    BaseType_t xHigherPriorityStatus = pdFALSE;
+
+    if(xPortInIsrContext() == pdFALSE) {
+      res = xSemaphoreGive(m_xConunter);
+    } else {
+      res = xSemaphoreGiveFromISR(m_xConunter, &xHigherPriorityStatus);
+
+      if(pdTRUE == xHigherPriorityStatus) {
+        portYIELD_FROM_ISR();
+      }
+    }
+
+    return res;
   }
 
   void fflush(void) {
-    while (xSemaphoreTake(m_xConunter, 1UL));
+    BaseType_t xHigherPriorityStatus = pdFALSE;
+
+    if(xPortInIsrContext() == pdFALSE) {
+      while (xSemaphoreTake(m_xConunter, 1UL));
+    } else {
+      // This part is entirely wrong. Have to rewrite it someday...
+      while(xSemaphoreTakeFromISR(m_xConunter, &xHigherPriorityStatus));
+
+      if(pdTRUE == xHigherPriorityStatus) {
+        portYIELD_FROM_ISR();
+      }
+    }
   }
 };
 #endif // configUSE_COUNTING_SEMAPHORES
@@ -368,31 +506,69 @@ public:
   ~Timer() {
     // if (m_xTimer != NULL) {
       xTimerDelete(m_xTimer, 0UL); // delete immediately
-      // m_xTimer = NULL;
+      m_xTimer = NULL;
     // }
   };
 
   BaseType_t start(TickType_t xTimerPeriodInMs = 0UL) {
-    xTimerChangePeriod(m_xTimer, pdMS_TO_TICKS(xTimerPeriodInMs), 0UL);
-    return xTimerStart(m_xTimer, 0UL);
+    BaseType_t res = pdFALSE;
+    BaseType_t xHigherPriorityStatus = pdFALSE;
+
+    if(xPortInIsrContext() == pdFALSE) {
+      xTimerChangePeriod(m_xTimer, pdMS_TO_TICKS(xTimerPeriodInMs), 0UL);
+      res = xTimerStart(m_xTimer, 0UL);
+    } else {
+      xTimerChangePeriodFromISR(m_xTimer, pdMS_TO_TICKS(xTimerPeriodInMs), &xHigherPriorityStatus);
+      res = xTimerStartFromISR(m_xTimer, &xHigherPriorityStatus);
+
+      if(pdTRUE == xHigherPriorityStatus) {
+        portYIELD_FROM_ISR();
+      }
+    }
+
+    return res;
   }
 
   BaseType_t stop() {
-    return xTimerStop(m_xTimer, 0UL);
+    BaseType_t res = pdFALSE;
+    BaseType_t xHigherPriorityStatus = pdFALSE;
+
+    if(xPortInIsrContext() == pdFALSE) {
+      res = xTimerStop(m_xTimer, 0UL);
+    } else {
+      res = xTimerStopFromISR(m_xTimer, &xHigherPriorityStatus);
+
+      if(pdTRUE == xHigherPriorityStatus) {
+        portYIELD_FROM_ISR();
+      }
+    }
+
+    return res;
   }
 
   BaseType_t isActive() {
     return xTimerIsTimerActive(m_xTimer);
   }
   
-#if 0
   BaseType_t restart(TickType_t xTimerPeriodInMs = 0UL) {
-    return xTimerReset(m_xTimer, pdMS_TO_TICKS(xTimerPeriodInMs));
+    BaseType_t res = pdFALSE;
+    BaseType_t xHigherPriorityStatus = pdFALSE;
+
+    if(xPortInIsrContext() == pdFALSE) {
+      res = xTimerReset(m_xTimer, pdMS_TO_TICKS(xTimerPeriodInMs));
+    } else {
+      res = xTimerResetFromISR(m_xTimer, &xHigherPriorityStatus);
+
+      if(pdTRUE == xHigherPriorityStatus) {
+        portYIELD_FROM_ISR();
+      }
+    }
+
+    return res;
   }
-#endif
 };
 #endif // configUSE_TIMERS
 
 // - - - - - - - - - - - - - - - - - - - - - - - -
 
-#endif /* FREERTOS_HELPER_HPP */
+#endif /* _FREERTOS_HELPER_HPP */

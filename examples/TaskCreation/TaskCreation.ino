@@ -1,10 +1,10 @@
 #include "FreeRTOS_helper.hpp"
 
 // Create task with 2048 words for stack.
-// But be carefull, size of stack depends on your microconteller
+// But be careful, size of stack depends on your MCU
 // AND things what you will be implementing!
 // Too much stack is ok, but will waste free RAM.
-// Too low value will cause "Stack oveflow" and firmware will fail.
+// Too low value will cause "Stack overflow" and firmware will fail.
 Task <2048> AppMainTask(vAppMainTask);
 
 // This is usual procedure
@@ -35,7 +35,7 @@ void vAppMainTask(void *pvArg)
   (void) pvArg;
 
   // As Serial is used in this Task, we need to wait
-  // until it will be inited in setup()
+  // until it will be initialised in setup()
   // Because usage of not initialised object - IS NOT SAFE
   AppMainTask.waitSignal();
 
