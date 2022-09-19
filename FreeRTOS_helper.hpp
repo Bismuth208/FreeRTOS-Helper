@@ -34,11 +34,11 @@
 #ifdef RP2040
 #ifndef xPortInIsrContext()
 #define xPortInIsrContext() portCHECK_IF_IN_ISR()
-#endif
 
 #ifdef portNOP()
 #undef portNOP()
 #define portNOP() __asm__ __volatile__ ("nop");
+#endif
 #endif
 
 #if ( ( configNUM_CORES > 1 ) && ( configUSE_CORE_AFFINITY == 1 ) )
@@ -81,7 +81,7 @@
 #endif
 
 
-#ifdef ESP32
+#if (defined(ESP32) || defined(ESP_PLATFORM))
 // nop() issue fix
 #ifndef XT_NOP()
 #define XT_NOP()  __asm__ __volatile__ ("nop");
