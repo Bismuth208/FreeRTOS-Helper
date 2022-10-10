@@ -1,5 +1,6 @@
-/*
- * Helpful API to make use of FreeRTOS a little easier
+/**
+ * Helpful API to make use of FreeRTOS a little easier.
+ * Supports both ESP-IDF and Arduino IDE.
  *
  * Author: Alexandr Antonov (@Bismuth208)
  * Licence: MIT
@@ -9,11 +10,12 @@
  * (*) support for RP2040 is not tested
  *
  * TODO:
- *  - add Semaphore class;
- *  - add xPortGetCoreID for multi-core systems
- *  - add more examples and howto
- *  - add EventGroups class;
- *  - add RP2040 support
+ *  - Add Semaphore class;
+ *  - Add xPortGetCoreID for multi-core systems;
+ *  - Add more examples and howto;
+ *  - Add EventGroups class;
+ *  - Improve Task notifications;
+ *  - Add RP2040 support;
  */
 
 #ifndef _FREERTOS_HELPER_HPP
@@ -23,12 +25,16 @@
 #include <stdint.h>
 #include <type_traits>
 
+#if defined(ARDUINO)
+#include <Arduino.h>
+#else
 #include "freertos/FreeRTOS.h"
 #include "freertos/FreeRTOSConfig.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "freertos/timers.h"
+#endif
 
 // - - - - - - - - - - - - - - - - - - - - - - - -
 #ifdef RP2040
@@ -81,14 +87,13 @@ typedef enum {
 
 // - - - - - - - - - - - - - - - - - - - - - - - -
 
-/*
- * Template class for Task creation and manipulation
+/**
+ * @brief Template class for Task creation and manipulation
  *
- * Examples:
- *
- * // Create task on CPU0 ( ESP32 like) and provide 4096 words for it in stack
+ * @code{cpp}
+ * // Create task on CPU0 ( PRO_CPU for ESP32) and provide 4096 words for it.
  * Task <4096>AppMainTask((TaskFunction_t) vAppMainTask, OS_MCU_CORE_0);
- *
+ * @endcode
  */
 template <size_t StackSizeInWords> class Task {
 public:
@@ -154,17 +159,17 @@ public:
   ~Task() = default;
 #endif
 
-  /*
-   * If for some reason Task must be stopped
-   */
 #if INCLUDE_vTaskSuspend
+  /**
+   * @brief If for some reason Task must be stopped
+   */
   void stop(void) { vTaskSuspend(m_xTask); }
 #endif
 
-  /*
-   * If for some reason Task must be started
-   */
 #if INCLUDE_vTaskResume
+  /**
+   * @brief If for some reason Task must be started
+   */
   void start(void) {
     if (xPortInIsrContext() == pdFALSE) {
       vTaskResume(m_xTask);
@@ -178,15 +183,14 @@ public:
   }
 #endif
 
-  /*
-   * This method allow to unblock Task.
-   * Lock/unlock mechanism similar to binary semaphore,
-   * but according to datasheet of FreeRTOS way more lightweight.
-   *
-   * NOTE!
-   * This method can be used in any task, even by task itself.
-   */
 #if configUSE_TASK_NOTIFICATIONS
+  /**
+   * @brief This method allow to unblock Task.
+   *        Lock/unlock mechanism similar to binary semaphore,
+   *        but according to docs for FreeRTOS it's way more lightweight.
+   *
+   * @note This method can be used in any task, even by task itself!
+   */
   void emitSignal(void) {
     BaseType_t xHigherPriorityStatus = pdFALSE;
 
@@ -202,15 +206,14 @@ public:
   }
 #endif
 
-  /*
-   * This method allow to block Task.
-   * Lock/unlock mechanism similar to binary semaphore,
-   * but according to datasheet of FreeRTOS way more lightweight.
-   *
-   * NOTE!
-   * This is must be used inside Task what need to be blocked!
-   */
 #if configUSE_TASK_NOTIFICATIONS
+  /**
+   * @brief This method allow to block Task.
+   *        Lock/unlock mechanism similar to binary semaphore,
+   *        but according to docs for FreeRTOS it's way more lightweight.
+   *
+   * @note This is must be used inside Task what need to be blocked!
+   */
   void waitSignal(TickType_t xTicksToWait = portMAX_DELAY) {
     do {
       portNOP();
@@ -218,13 +221,15 @@ public:
   }
 #endif
 
-  /*
-   * Yet another way to wait and pause(block) Task
-   *
-   * Usage:
-   *  Task<0>::delay(500); // block Task for 500 ms.
-   */
 #if INCLUDE_vTaskDelay
+  /**
+   * @brief Yet another way to wait and pause(block) Task
+   *
+   * @code{cpp}
+   *  // Block Task for 500 ms.
+   *  Task<0>::delay(500);
+   * @endcode
+   */
   static void delay(TickType_t xTimerPeriodInMs = 1UL) {
     vTaskDelay(pdMS_TO_TICKS(xTimerPeriodInMs));
   }
@@ -233,14 +238,13 @@ public:
 
 // - - - - - - - - - - - - - - - - - - - - - - - -
 
-/*
- * Template class for Queue
+/**
+ * @brief Template class for Queue
  *
- * Examples:
- *
+ * @code{cpp}
  * // Creation of Queue with 128 elements of type uint32_t
  * Queue <128, uint32_t>TxQueue;
- *
+ * @endcode
  */
 template <size_t QueueSize, class T> class Queue {
 public:
@@ -329,19 +333,18 @@ public:
 
 // - - - - - - - - - - - - - - - - - - - - - - - -
 
-/*
- * Class for Mutex
+/**
+ * @brief Implementation of Mutex Class over Semaphore
  *
- * Examples:
- *
+ * @code{cpp}
  * Mutex spiMutex;  // creation of SPI mutex
  *
  * spiMutex.lock(); // blocks resource for other tasks
  * ... some actions ...
  * spiMutex.unlock(); // unblocks resource for other tasks
+ * @endcode
  *
- * NOTE!
- * Do not use Mutexes inside ISR context.
+ * @note Do not use Mutexes inside ISR context!
  */
 #if configUSE_MUTEXES
 class Mutex {
@@ -373,21 +376,27 @@ public:
 
 // - - - - - - - - - - - - - - - - - - - - - - - -
 
-/*
- * Class for Counting Semaphore
+/**
+ * @brief Implementation of Counter Class over Counting Semaphore
  *
- * Examples:
+ * @code{cpp}
+ * // Creation:
+ * Counter btnPressCounter;
  *
- * Counter btnPressCounter;  // creation
- *
+ * // In one Task, ISR or any callback:
+ * ...
  * if (btn_read(SOME_BTN_NUM) == 1) {
  *   btnPressCounter.give();
  * }
+ * ...
  *
- * Meanwhile in other Task:
+ * // Meanwhile in other Task:
+ * ...
  * while (btnPressCounter.take(0UL) == pdTRUE) {
  *   blink_ok_led();
  * }
+ * ...
+ * @endcode
  */
 #if configUSE_COUNTING_SEMAPHORES
 template <size_t MaxCount> class Counter {
@@ -467,19 +476,22 @@ public:
 
 // - - - - - - - - - - - - - - - - - - - - - - - -
 
-/*
- * Template class for software Timer
+/**
+ * @brief Template class for software Timer
  *
- * Examples:
- *
+ * @code{cpp}
  * // creation of "one shot" timer
  * Timer wifiOffTimer;
  *
- * if (something == pdTRUE) {
+ * ...
+ * if (xSomeCondition == pdTRUE) {
  *   if (wifiOffTimer.isActive() == pdFALSE) {
- *     wifiOffTimer.start(500); // shut down WiFi after 500ms.
+ *     // Shut down WiFi after 500ms.
+ *     wifiOffTimer.start(500);
  *   }
  * }
+ * ...
+ * @endcode
  */
 #if configUSE_TIMERS
 class Timer {
