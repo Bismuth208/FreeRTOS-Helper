@@ -1,25 +1,36 @@
+#include <assert.h>
+
 #include "FreeRTOS_helper.hpp"
 
 // Declaration of Task code
 void vAppMainTask(void* pvArg);
 
-// Create task with 768 words for stack.
+// Create multiple Tasks with 768 words for stack.
+// Both Tasks use the same code.
 // But be careful, size of stack depends on your MCU
 // AND things what you will be implementing!
 // Too much stack is ok, but will waste free RAM.
 // Too low value will cause "Stack overflow" and firmware will fail.
-OSTask <768> AppMainTask(vAppMainTask, "AppMainTask");
+OSTask <768> AppFistTask(vAppMainTask, "AppFistTask");
+OSTask <768> AppSecondTask(vAppMainTask, "AppSecondTask");
+
+OSMutex serialPrintMutex;
 
 // This is usual procedure
 void setup()
 {
   Serial.begin(115200);
 
-  AppMainTask.init();
+  // At first, create Sync primitive as Mutex
+  serialPrintMutex.init();
 
-  // This is way of delayed start of Task
-  // And also safe way to use multithreading
-  AppMainTask.emitSignal();
+  // Pass task object to the task on it's creation as an argument
+  AppFistTask.setArg(reinterpret_cast< void* >(&AppFistTask));
+  AppSecondTask.setArg(reinterpret_cast< void* >(&AppSecondTask));
+
+  // Create and initialize tasks
+  AppFistTask.init();
+  AppSecondTask.init();
 }
 
 // Most of the time this routine will not be needed
@@ -29,23 +40,28 @@ void loop()
   OSTask<0>::yield();
 }
 
+void printMessage(const char* msg)
+{
+  serialPrintMutex.lock();
+
+  Serial.print("Hello from: ");
+  Serial.println(msg);
+
+  serialPrintMutex.unlock();
+}
+
 // This is Task's regular function similar to loop()
 // BUT there is at least two general rules:
 //   - no any return !
 //   - every created task MUST contain endless loop
 void vAppMainTask([[maybe_unused]] void* pvArg)
 {
-  // In this example passed argument is not used
-  // as at creation moment we provide nothing
+  assert(pvArg != nullptr);
 
-  // As Serial is used in this Task, we need to wait
-  // until it will be initialised in setup()
-  // Because usage of not initialised object - IS NOT SAFE
-  AppMainTask.waitSignal();
+  auto AppTask = reinterpret_cast< OSTask<0>* >(pvArg);
 
   for (;;) {
-    Serial.print("Hello from: ");
-    Serial.println(AppMainTask.getName());
+    printMessage(AppTask->getName());
 
     // This is regular delay for FreeRTOS task
     // Every Task, if possible, must be blocked for somehow:

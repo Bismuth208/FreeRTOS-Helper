@@ -10,23 +10,28 @@ void vAppMainTask(void* pvArg);
 // Too low value will cause "Stack overflow" and firmware will fail.
 OSTask <768> AppMainTask(vAppMainTask, "AppMainTask");
 
+// Create Queue for 5 elements of type bool
+OSQueue <5, bool>AppQueue;
+
 // This is usual procedure
 void setup()
 {
   Serial.begin(115200);
 
+  AppQueue.init();
   AppMainTask.init();
-
-  // This is way of delayed start of Task
-  // And also safe way to use multithreading
-  AppMainTask.emitSignal();
 }
 
 // Most of the time this routine will not be needed
 void loop()
 {
-  // so, just switch to another task
-  OSTask<0>::yield();
+  static bool testSwitch = false;
+
+  testSwitch = !testSwitch;
+  AppQueue.send(&testSwitch);
+
+  // Just switch to another task for 500ms
+  OSTask<0>::delay(500);
 }
 
 // This is Task's regular function similar to loop()
@@ -38,21 +43,12 @@ void vAppMainTask([[maybe_unused]] void* pvArg)
   // In this example passed argument is not used
   // as at creation moment we provide nothing
 
-  // As Serial is used in this Task, we need to wait
-  // until it will be initialised in setup()
-  // Because usage of not initialised object - IS NOT SAFE
-  AppMainTask.waitSignal();
-
   for (;;) {
-    Serial.print("Hello from: ");
-    Serial.println(AppMainTask.getName());
+    bool status = false;
 
-    // This is regular delay for FreeRTOS task
-    // Every Task, if possible, must be blocked for somehow:
-    //  - delay
-    //  - mutex lock\unlock
-    //  - queue wait
-    //  - e.t.c 
-    OSTask<0>::delay(500); // for 500ms.
+    // This task will be blocked here until something apper in Queue
+    if (AppQueue.receive(&status)) {
+      Serial.println( status ? "Bep!" : "Bop!");
+    }
   }
 }

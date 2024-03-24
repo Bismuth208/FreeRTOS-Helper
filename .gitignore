@@ -17,6 +17,9 @@ $RECYCLE.BIN/
 Debug/
 Release/
 
+# IDE stuff
+.vscode
+
 # python
 *.pyc
 __pycache__/

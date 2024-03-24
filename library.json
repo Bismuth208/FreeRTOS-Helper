@@ -1,0 +1,17 @@
+{
+  "name": "FreeRTOS-Helper",
+  "description": "library for wrapper over FreeRTOS",
+  "keywords": "FreeRTOS, OS, RTOS, ESP32, rpi-pico, rp2040, raspberry-pico, stm32",
+  "authors": {
+    "name": "Antonov Alexandr (Bismuth208)",
+    "url": "https://github.com/Bismuth208/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Bismuth208/FreeRTOS-Helper.git"
+  },
+  "version": "1.0.0",
+  "framework": "arduino",
+  "platforms": "*",
+  "license": "MIT"
+}
