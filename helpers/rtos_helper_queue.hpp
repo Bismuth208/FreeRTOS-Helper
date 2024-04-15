@@ -265,13 +265,7 @@ public:
     */
     bool receive(T& val, size_t xMsToWait = portMAX_DELAY_MS)
     {
-        T tmp_val = val;
-        bool res = _receive(&tmp_val, xMsToWait);
-        if (res) {
-            // TODO: std::copy(val, tmp_val, it ?);
-            memcpy(val, tmp_val, sizeof(T));
-        }
-        return res;
+        return _receive(&val, xMsToWait);
     }
 
     /**
@@ -293,7 +287,7 @@ public:
     /**
      * @brief Send an item data to the Queue
      * 
-     * @param val Copy of the data which will be copied/sended to the Queue
+     * @param val Reference to the data which will be copied/sended to the Queue
      * @param xMsToWait How much time to wait in milliseconds for free space in Queue
      * 
      * @return "true" if it's sended,"false" if not initialised and/or: no free space, timeout reached
@@ -301,10 +295,9 @@ public:
      * @note 1. This method is thread-safe
      * @note 2. This method is an ISR safe
     */
-    bool send(T& val, size_t xMsToWait = portMAX_DELAY_MS)
+    bool send(const T& val, size_t xMsToWait = portMAX_DELAY_MS)
     {
-        T tmp_val = val;
-        return _send(&tmp_val, xMsToWait);
+        return _send(&val, xMsToWait);
     }
 
     /**
@@ -318,7 +311,7 @@ public:
      * @note 1. This method is thread-safe
      * @note 2. This method is an ISR safe
     */
-    bool send(T* val, size_t xMsToWait = portMAX_DELAY_MS)
+    bool send(const T* val, size_t xMsToWait = portMAX_DELAY_MS)
     {
         return _send(val, xMsToWait);
     }
@@ -336,13 +329,7 @@ public:
     */
     bool peek(T& val, size_t xMsToWait = portMAX_DELAY_MS)
     {
-        T tmp_val = val;
-        bool res = _peek(&tmp_val, xMsToWait);
-        if (res) {
-            // TODO: std::copy(val, tmp_val, it ?);
-            memcpy(val, tmp_val, sizeof(T));
-        }
-        return res;
+        return _peek(&val, xMsToWait);
     }
 
     /**

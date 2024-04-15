@@ -28,7 +28,7 @@ void loop()
   static bool testSwitch = false;
 
   testSwitch = !testSwitch;
-  AppQueue.send(&testSwitch);
+  AppQueue.send(testSwitch);
 
   // Just switch to another task for 500ms
   OSTask<0>::delay(500);
@@ -47,7 +47,7 @@ void vAppMainTask([[maybe_unused]] void* pvArg)
     bool status = false;
 
     // This task will be blocked here until something apper in Queue
-    if (AppQueue.receive(&status)) {
+    if (AppQueue.receive(status)) {
       Serial.println( status ? "Bep!" : "Bop!");
     }
   }
